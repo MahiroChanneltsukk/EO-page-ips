@@ -16,8 +16,8 @@ async def check_ip(client, ip, semaphore):
                 timeout=5,
                 follow_redirects=False,  # 禁用自动重定向，手动检查
                 headers={
-                    'Host': 'api-edge-sakiko-dispatch-network-aws-cdn.dahi.edu.eu.org',
-                    'User-Agent': 'Mozilla/5.0 (compatible; GitHub-Actions-Scanner/1.0)'
+                    'Host': 'edgeone.app',
+                    'User-Agent': 'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Mobile Safari/537.36'
                 }
             )
             
