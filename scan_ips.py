@@ -3,7 +3,6 @@ import ipaddress
 import asyncio
 import httpx
 import time
-from tqdm import tqdm
 import os
 
 async def check_ip(client, ip, semaphore):
@@ -25,11 +24,12 @@ async def check_ip(client, ip, semaphore):
             if (response.status_code == 302 and 
                 'Location' in response.headers and
                 response.headers['Location'] == 'https://edgeone.ai/products/pages'):
-                return ip, True
+                return ip, "可用"
+            else:
+                return ip, "不可及"
                 
         except Exception as e:
-            pass
-        return ip, False
+            return ip, "不可及"
 
 async def scan_network(network_range, concurrency=300):
     """扫描网络段"""
@@ -56,18 +56,24 @@ async def scan_network(network_range, concurrency=300):
         tasks = [check_ip(client, ip, semaphore) for ip in ips]
         
         completed = 0
-        with tqdm(total=len(tasks), desc="扫描进度") as pbar:
-            for coro in asyncio.as_completed(tasks):
-                ip, is_available = await coro
-                if is_available:
-                    available_ips.append(ip)
-                    tqdm.write(f"✅ 可用IP: {ip}")
-                completed += 1
-                pbar.update(1)
+        last_report_time = time.time()
+        
+        for coro in asyncio.as_completed(tasks):
+            ip, status = await coro
+            if status == "可用":
+                available_ips.append(ip)
+                print(f"✅ 可用IP: {ip}")
+            
+            completed += 1
+            
+            # 每扫描500个IP输出一次状态
+            if completed % 500 == 0:
+                current_time = time.time()
+                elapsed = current_time - last_report_time
+                speed = 500 / elapsed if elapsed > 0 else 0
+                last_report_time = current_time
                 
-                # 每扫描500个IP输出一次状态
-                if completed % 500 == 0:
-                    print(f"📈 已扫描: {completed}/{len(ips)} | 可用IP: {len(available_ips)}")
+                print(f"📈 已扫描: {completed}/{len(ips)} | 可用IP: {len(available_ips)} | 不可及: {completed - len(available_ips)} | 扫描速度: {speed:.2f} IP/秒")
     
     return available_ips
 
@@ -128,8 +134,9 @@ def main():
         print("\n" + "=" * 60)
         print("🎉 扫描完成!")
         print(f"⏱️  总耗时: {duration:.2f} 秒")
-        print(f"📈 扫描速度: {len(ips)/max(duration, 0.1):.2f} IP/秒")
+        print(f"📈 平均扫描速度: {len(ips)/max(duration, 0.1):.2f} IP/秒")
         print(f"✅ 可用IP数量: {len(available_ips)}")
+        print(f"❌ 不可及IP数量: {len(ips) - len(available_ips)}")
         print(f"💾 结果文件: available_ips.txt")
         
         # 显示可用IP并验证前几个
