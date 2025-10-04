@@ -12,8 +12,8 @@ async def check_ip(client, ip, semaphore):
         try:
             # 使用IP作为目标，设置Host头，并禁用自动重定向
             response = await client.get(
-                f"https://{ip}/",
-                timeout=5,
+                f"http://{ip}/",
+                timeout=2,
                 follow_redirects=False,  # 禁用自动重定向，手动检查
                 headers={
                     'Host': 'edgeone.app',
