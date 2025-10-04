@@ -29,8 +29,8 @@ jobs:
       run: |
         python scan_ips.py
       env:
-        CONCURRENCY: 2000  # GitHub Actions环境建议300-500并发
-        TIMEOUT: 3.0
+        CONCURRENCY: 800  # GitHub Actions环境建议300-500并发
+        TIMEOUT: 8.0
         
     - name: 上传扫描结果
       uses: actions/upload-artifact@v4
