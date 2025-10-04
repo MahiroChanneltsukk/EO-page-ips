@@ -111,13 +111,37 @@ class ProgressReporter:
         print("::endgroup::", flush=True)
         sys.stdout.flush()
 
-async def scan_network(network_range: str, concurrency: int = 300, timeout: float = 5.0) -> List[str]:
-    """Scan network range"""
-    network = ipaddress.ip_network(network_range)
-    ips = [str(ip) for ip in network.hosts()]
+def read_ranges_from_file(filename: str = "range.txt") -> List[str]:
+    """Read network ranges from file, one per line"""
+    try:
+        with open(filename, 'r') as f:
+            ranges = [line.strip() for line in f if line.strip() and not line.strip().startswith('#')]
+        return ranges
+    except FileNotFoundError:
+        print(f"Error: {filename} not found!", flush=True)
+        sys.exit(1)
+    except Exception as e:
+        print(f"Error reading {filename}: {e}", flush=True)
+        sys.exit(1)
+
+def parse_ranges(ranges: List[str]) -> List[str]:
+    """Parse network ranges and return list of all IPs"""
+    all_ips = []
     
-    print(f"Starting scan of {network_range}", flush=True)
-    print(f"Total IPs: {len(ips)}", flush=True)
+    for network_range in ranges:
+        try:
+            network = ipaddress.ip_network(network_range.strip())
+            ips = [str(ip) for ip in network.hosts()]
+            all_ips.extend(ips)
+            print(f"✓ Loaded range: {network_range} ({len(ips)} IPs)", flush=True)
+        except ValueError as e:
+            print(f"✗ Invalid range: {network_range} - {e}", flush=True)
+    
+    return all_ips
+
+async def scan_network(ips: List[str], concurrency: int = 300, timeout: float = 5.0) -> List[str]:
+    """Scan network range"""
+    print(f"\nStarting scan of {len(ips)} IPs", flush=True)
     print(f"Concurrency: {concurrency}", flush=True)
     print(f"Timeout: {timeout}s", flush=True)
     print(f"Start Time: {time.strftime('%Y-%m-%d %H:%M:%S')}", flush=True)
@@ -203,7 +227,7 @@ def main():
     start_time = time.time()
     
     # Configuration
-    network_range = "101.33.0.0/19"
+    range_file = os.getenv('RANGE_FILE', 'range.txt')
     concurrency = int(os.getenv('CONCURRENCY', '300'))
     timeout = float(os.getenv('TIMEOUT', '5.0'))
     
@@ -212,15 +236,35 @@ def main():
     print("=" * 60, flush=True)
     print(f"Target Domain: edgeone.app", flush=True)
     print(f"Expected Redirect: https://edgeone.ai/products/pages", flush=True)
-    print(f"Scan Range: {network_range}", flush=True)
+    print(f"Range File: {range_file}", flush=True)
     print(f"Concurrency: {concurrency}", flush=True)
     print(f"Timeout: {timeout}s", flush=True)
     print("=" * 60, flush=True)
     sys.stdout.flush()
     
     try:
+        # Read ranges from file
+        print(f"\nReading network ranges from {range_file}...", flush=True)
+        ranges = read_ranges_from_file(range_file)
+        print(f"Found {len(ranges)} network ranges", flush=True)
+        sys.stdout.flush()
+        
+        if not ranges:
+            print("No valid ranges found in file!", flush=True)
+            sys.exit(1)
+        
+        # Parse all ranges and collect IPs
+        print("\nParsing network ranges...", flush=True)
+        all_ips = parse_ranges(ranges)
+        print(f"\nTotal IPs to scan: {len(all_ips)}", flush=True)
+        sys.stdout.flush()
+        
+        if not all_ips:
+            print("No valid IPs to scan!", flush=True)
+            sys.exit(1)
+        
         # Run scan
-        available_ips = asyncio.run(scan_network(network_range, concurrency, timeout))
+        available_ips = asyncio.run(scan_network(all_ips, concurrency, timeout))
         
         # Sort IPs
         available_ips.sort(key=lambda ip: [int(part) for part in ip.split('.')])
@@ -230,7 +274,8 @@ def main():
         
         # Batch verification
         if available_ips:
-            verified_ips = verify_redirects(available_ips[:10], timeout)  # Verify first 10 as sample
+            verify_count = min(10, len(available_ips))
+            verified_ips = verify_redirects(available_ips[:verify_count], timeout)
             save_results(verified_ips, "verified_ips.txt")
         
         # Output statistics
@@ -239,16 +284,14 @@ def main():
         minutes, seconds = divmod(duration, 60)
         hours, minutes = divmod(minutes, 60)
         
-        total_ips = len(list(ipaddress.ip_network(network_range).hosts()))
-        
         print("\n" + "=" * 60, flush=True)
         print("Scan Complete!", flush=True)
         print(f"Total Time: {int(hours)}h {int(minutes)}m {seconds:.1f}s", flush=True)
-        print(f"Total IPs: {total_ips}", flush=True)
+        print(f"Total IPs Scanned: {len(all_ips)}", flush=True)
         print(f"Available IPs: {len(available_ips)}", flush=True)
-        print(f"Unreachable IPs: {total_ips - len(available_ips)}", flush=True)
-        print(f"Success Rate: {len(available_ips)/total_ips*100:.4f}%", flush=True)
-        print(f"Average Speed: {total_ips/max(duration/60, 0.1):.1f} IPs/min", flush=True)
+        print(f"Unreachable IPs: {len(all_ips) - len(available_ips)}", flush=True)
+        print(f"Success Rate: {len(available_ips)/len(all_ips)*100:.4f}%", flush=True)
+        print(f"Average Speed: {len(all_ips)/max(duration/60, 0.1):.1f} IPs/min", flush=True)
         print(f"Results File: available_ips.txt", flush=True)
         
         # Display available IPs
