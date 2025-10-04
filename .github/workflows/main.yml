@@ -1,25 +1,50 @@
-name: Update ips
+name: IP段扫描
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:  # 手动触发
   schedule:
+    # 每天UTC时间2点运行（北京时间10点）
     - cron: '0 2 * * *'
+  push:
+    branches: [ main ]
+    paths: [ 'scan_ips.py' ]
 
 jobs:
-  scan:
+  scan-ips:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
     
     steps:
-    - uses: actions/checkout@v4
-    - uses: actions/setup-python@v4
+    - name: 检出代码
+      uses: actions/checkout@v4
+      
+    - name: 设置Python环境
+      uses: actions/setup-python@v4
       with:
         python-version: '3.10'
+        cache: 'pip'
         
-    - run: pip install httpx
-    - run: python simple_scan.py
-      
-    - uses: actions/upload-artifact@v4
+    - name: 安装依赖
+      run: |
+        python -m pip install --upgrade pip
+        pip install httpx tqdm
+        
+    - name: 运行IP扫描
+      run: |
+        python scan_ips.py
+      env:
+        CONCURRENCY: 400  # GitHub Actions环境建议300-500并发
+        
+    - name: 上传扫描结果
+      uses: actions/upload-artifact@v4
       with:
-        name: ip-results
+        name: available-ips
         path: available_ips.txt
+        retention-days: 30
+        
+    - name: 提交结果到仓库
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add available_ips.txt
+        git commit -m "📈 更新IP扫描结果 $(date +'%Y-%m-%d %H:%M:%S')" || exit 0
+        git push
