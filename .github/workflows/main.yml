@@ -1,0 +1,25 @@
+name: Update ips
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 2 * * *'
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+        
+    - run: pip install httpx
+    - run: python simple_scan.py
+      
+    - uses: actions/upload-artifact@v4
+      with:
+        name: ip-results
+        path: available_ips.txt
