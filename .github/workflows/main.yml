@@ -29,7 +29,7 @@ jobs:
       run: |
         python scan_ips.py
       env:
-        CONCURRENCY: 400  # GitHub Actions环境建议300-500并发
+        CONCURRENCY: 50  # GitHub Actions环境建议300-500并发
         
     - name: 上传扫描结果
       uses: actions/upload-artifact@v4
