@@ -4,6 +4,7 @@ import asyncio
 import httpx
 import time
 import os
+import sys
 from typing import List, Tuple
 
 class IPScanner:
@@ -22,7 +23,7 @@ class IPScanner:
         }
         
     async def __aenter__(self):
-        # 创建可复用的HTTP客户端
+        # Create reusable HTTP client
         timeout_config = httpx.Timeout(self.timeout, connect=3.0)
         limits = httpx.Limits(
             max_connections=self.concurrency,
@@ -44,24 +45,24 @@ class IPScanner:
             await self.client.aclose()
     
     async def check_ip(self, ip: str, semaphore: asyncio.Semaphore) -> Tuple[str, str]:
-        """检查单个IP是否302重定向到目标URL"""
+        """Check if a single IP redirects (302) to the target URL"""
         async with semaphore:
             try:
                 response = await self.client.get(
                     f"http://{ip}/",
-                    headers={'Host': 'edgeone.app'}  # 只覆盖必要的头
+                    headers={'Host': 'edgeone.app'}
                 )
                 
-                # 检查是否是302重定向并且Location头匹配目标
+                # Check if it's a 302 redirect with matching Location header
                 if (response.status_code == 302 and 
                     'Location' in response.headers and
                     response.headers['Location'] == 'https://edgeone.ai/products/pages'):
-                    return ip, "可用"
+                    return ip, "available"
                 else:
-                    return ip, "不可及"
+                    return ip, "unreachable"
                     
             except (httpx.TimeoutException, httpx.ConnectError, httpx.NetworkError, Exception):
-                return ip, "不可及"
+                return ip, "unreachable"
 
 class ProgressReporter:
     def __init__(self, total_ips: int):
@@ -77,13 +78,13 @@ class ProgressReporter:
         self.available_ips = available_ips.copy()
         
         current_time = time.time()
-        if current_time - self.last_report_time >= 60:  # 每分钟报告一次
+        if current_time - self.last_report_time >= 60:  # Report every minute
             self._report_progress(current_time)
             self.last_report_time = current_time
             self.last_completed = completed
     
     def final_report(self):
-        """最终报告"""
+        """Final report"""
         current_time = time.time()
         self._report_progress(current_time)
     
@@ -98,28 +99,31 @@ class ProgressReporter:
         remaining_ips = self.total_ips - self.completed
         eta_minutes = remaining_ips / max(avg_speed, 1) if avg_speed > 0 else 0
         
-        print(f"\n📊 进度报告 [{time.strftime('%H:%M:%S')}]")
-        print(f"📈 已扫描: {self.completed}/{self.total_ips} ({self.completed/self.total_ips*100:.1f}%)")
-        print(f"✅ 可用IP: {len(self.available_ips)}")
-        print(f"❌ 不可及: {self.completed - len(self.available_ips)}")
-        print(f"⚡ 近期速度: {recent_speed:.1f} IP/分钟")
-        print(f"📊 平均速度: {avg_speed:.1f} IP/分钟")
+        # GitHub Actions-friendly output with explicit flushing
+        print(f"\n::group::Progress Report [{time.strftime('%H:%M:%S')}]", flush=True)
+        print(f"Scanned: {self.completed}/{self.total_ips} ({self.completed/self.total_ips*100:.1f}%)", flush=True)
+        print(f"Available IPs: {len(self.available_ips)}", flush=True)
+        print(f"Unreachable: {self.completed - len(self.available_ips)}", flush=True)
+        print(f"Recent Speed: {recent_speed:.1f} IPs/min", flush=True)
+        print(f"Average Speed: {avg_speed:.1f} IPs/min", flush=True)
         if eta_minutes > 0:
-            print(f"⏱️  预计剩余: {eta_minutes:.1f} 分钟")
-        print("-" * 50)
+            print(f"ETA: {eta_minutes:.1f} minutes", flush=True)
+        print("::endgroup::", flush=True)
+        sys.stdout.flush()
 
 async def scan_network(network_range: str, concurrency: int = 300, timeout: float = 5.0) -> List[str]:
-    """扫描网络段"""
+    """Scan network range"""
     network = ipaddress.ip_network(network_range)
     ips = [str(ip) for ip in network.hosts()]
     
-    print(f"🚀 开始扫描 {network_range}")
-    print(f"📊 总IP数量: {len(ips)}")
-    print(f"⚡ 并发数: {concurrency}")
-    print(f"⏱️  超时时间: {timeout}秒")
-    print(f"⏰ 开始时间: {time.strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"🎯 目标重定向: https://edgeone.ai/products/pages")
-    print("-" * 60)
+    print(f"Starting scan of {network_range}", flush=True)
+    print(f"Total IPs: {len(ips)}", flush=True)
+    print(f"Concurrency: {concurrency}", flush=True)
+    print(f"Timeout: {timeout}s", flush=True)
+    print(f"Start Time: {time.strftime('%Y-%m-%d %H:%M:%S')}", flush=True)
+    print(f"Target Redirect: https://edgeone.ai/products/pages", flush=True)
+    print("-" * 60, flush=True)
+    sys.stdout.flush()
     
     available_ips = []
     semaphore = asyncio.Semaphore(concurrency)
@@ -133,19 +137,20 @@ async def scan_network(network_range: str, concurrency: int = 300, timeout: floa
             ip, status = await coro
             completed_count += 1
             
-            if status == "可用":
+            if status == "available":
                 available_ips.append(ip)
-                print(f"✅ 可用IP: {ip}")
+                print(f"✓ Available IP: {ip}", flush=True)
+                sys.stdout.flush()
             
-            # 更新进度
+            # Update progress
             reporter.update(completed_count, available_ips)
     
-    # 最终报告
+    # Final report
     reporter.final_report()
     return available_ips
 
 def verify_redirects(ips: List[str], timeout: int = 5, max_workers: int = 10) -> List[str]:
-    """批量验证IP的重定向是否正确"""
+    """Batch verify IP redirects"""
     import requests
     from concurrent.futures import ThreadPoolExecutor, as_completed
     
@@ -166,7 +171,8 @@ def verify_redirects(ips: List[str], timeout: int = 5, max_workers: int = 10) ->
         return ip, False
     
     verified_ips = []
-    print(f"\n🔍 开始验证 {len(ips)} 个IP的重定向...")
+    print(f"\nVerifying {len(ips)} IP redirects...", flush=True)
+    sys.stdout.flush()
     
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_ip = {executor.submit(verify_single, ip): ip for ip in ips}
@@ -175,53 +181,59 @@ def verify_redirects(ips: List[str], timeout: int = 5, max_workers: int = 10) ->
             ip, is_valid = future.result()
             if is_valid:
                 verified_ips.append(ip)
-                print(f"✅ {ip} - 验证成功")
+                print(f"✓ {ip} - Verified", flush=True)
             else:
-                print(f"❌ {ip} - 验证失败")
+                print(f"✗ {ip} - Failed", flush=True)
+            sys.stdout.flush()
     
     return verified_ips
 
 def save_results(ips: List[str], filename: str = "available_ips.txt"):
-    """保存结果到文件"""
+    """Save results to file"""
     with open(filename, "w") as f:
         for ip in ips:
             f.write(ip + "\n")
-    print(f"💾 结果已保存到: {filename}")
+    print(f"Results saved to: {filename}", flush=True)
+    sys.stdout.flush()
 
 def main():
+    # Ensure unbuffered output for GitHub Actions
+    sys.stdout.reconfigure(line_buffering=True)
+    
     start_time = time.time()
     
-    # 配置参数
+    # Configuration
     network_range = "43.174.0.0/15"
     concurrency = int(os.getenv('CONCURRENCY', '300'))
     timeout = float(os.getenv('TIMEOUT', '5.0'))
     
-    print("=" * 60)
-    print("GitHub Actions IP扫描工具 - 高性能复用版")
-    print("=" * 60)
-    print(f"🎯 目标域名: edgeone.app")
-    print(f"🔄 期望重定向: https://edgeone.ai/products/pages")
-    print(f"🌐 扫描网段: {network_range}")
-    print(f"⚡ 并发数: {concurrency}")
-    print(f"⏱️  超时时间: {timeout}秒")
-    print("=" * 60)
+    print("=" * 60, flush=True)
+    print("GitHub Actions IP Scanner - High Performance", flush=True)
+    print("=" * 60, flush=True)
+    print(f"Target Domain: edgeone.app", flush=True)
+    print(f"Expected Redirect: https://edgeone.ai/products/pages", flush=True)
+    print(f"Scan Range: {network_range}", flush=True)
+    print(f"Concurrency: {concurrency}", flush=True)
+    print(f"Timeout: {timeout}s", flush=True)
+    print("=" * 60, flush=True)
+    sys.stdout.flush()
     
     try:
-        # 运行扫描
+        # Run scan
         available_ips = asyncio.run(scan_network(network_range, concurrency, timeout))
         
-        # 按IP地址排序
+        # Sort IPs
         available_ips.sort(key=lambda ip: [int(part) for part in ip.split('.')])
         
-        # 保存初步结果
+        # Save initial results
         save_results(available_ips)
         
-        # 批量验证
+        # Batch verification
         if available_ips:
-            verified_ips = verify_redirects(available_ips[:10], timeout)  # 只验证前10个作为样本
+            verified_ips = verify_redirects(available_ips[:10], timeout)  # Verify first 10 as sample
             save_results(verified_ips, "verified_ips.txt")
         
-        # 输出统计信息
+        # Output statistics
         end_time = time.time()
         duration = end_time - start_time
         minutes, seconds = divmod(duration, 60)
@@ -229,31 +241,34 @@ def main():
         
         total_ips = len(list(ipaddress.ip_network(network_range).hosts()))
         
-        print("\n" + "=" * 60)
-        print("🎉 扫描完成!")
-        print(f"⏱️  总耗时: {int(hours)}时{int(minutes)}分{seconds:.1f}秒")
-        print(f"📊 总IP数量: {total_ips}")
-        print(f"✅ 可用IP数量: {len(available_ips)}")
-        print(f"❌ 不可及IP数量: {total_ips - len(available_ips)}")
-        print(f"📈 可用率: {len(available_ips)/total_ips*100:.4f}%")
-        print(f"⚡ 平均速度: {total_ips/max(duration/60, 0.1):.1f} IP/分钟")
-        print(f"💾 结果文件: available_ips.txt")
+        print("\n" + "=" * 60, flush=True)
+        print("Scan Complete!", flush=True)
+        print(f"Total Time: {int(hours)}h {int(minutes)}m {seconds:.1f}s", flush=True)
+        print(f"Total IPs: {total_ips}", flush=True)
+        print(f"Available IPs: {len(available_ips)}", flush=True)
+        print(f"Unreachable IPs: {total_ips - len(available_ips)}", flush=True)
+        print(f"Success Rate: {len(available_ips)/total_ips*100:.4f}%", flush=True)
+        print(f"Average Speed: {total_ips/max(duration/60, 0.1):.1f} IPs/min", flush=True)
+        print(f"Results File: available_ips.txt", flush=True)
         
-        # 显示可用IP
+        # Display available IPs
         if available_ips:
-            print(f"\n📋 前10个可用IP:")
+            print(f"\nFirst 10 Available IPs:", flush=True)
             for ip in available_ips[:10]:
-                print(f"  {ip}")
+                print(f"  {ip}", flush=True)
             
             if len(available_ips) > 10:
-                print(f"  ... 还有 {len(available_ips) - 10} 个IP")
+                print(f"  ... and {len(available_ips) - 10} more", flush=True)
         else:
-            print("\n❌ 未找到可用IP")
+            print("\nNo available IPs found", flush=True)
+        
+        sys.stdout.flush()
         
     except Exception as e:
-        print(f"❌ 扫描过程中出现错误: {e}")
+        print(f"Error during scan: {e}", flush=True)
         import traceback
         traceback.print_exc()
+        sys.stdout.flush()
 
 if __name__ == "__main__":
     main()
