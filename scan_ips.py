@@ -7,21 +7,31 @@ from tqdm import tqdm
 import os
 
 async def check_ip(client, ip, semaphore):
-    """检查单个IP是否返回404"""
+    """检查单个IP是否302重定向到目标URL"""
     async with semaphore:
         try:
+            # 使用IP作为目标，设置Host头，并禁用自动重定向
             response = await client.get(
-                "https://api-edge-sakiko-dispatch-network-aws-cdn.dahi.edu.eu.org/",
+                f"https://{ip}/",
                 timeout=5,
-                follow_redirects=True
+                follow_redirects=False,  # 禁用自动重定向，手动检查
+                headers={
+                    'Host': 'api-edge-sakiko-dispatch-network-aws-cdn.dahi.edu.eu.org',
+                    'User-Agent': 'Mozilla/5.0 (compatible; GitHub-Actions-Scanner/1.0)'
+                }
             )
-            if response.status_code == 404:
+            
+            # 检查是否是302重定向并且Location头匹配目标
+            if (response.status_code == 302 and 
+                'Location' in response.headers and
+                response.headers['Location'] == 'https://edgeone.ai/products/pages'):
                 return ip, True
+                
         except Exception as e:
             pass
         return ip, False
 
-async def scan_network(network_range, concurrency=500):
+async def scan_network(network_range, concurrency=300):
     """扫描网络段"""
     network = ipaddress.ip_network(network_range)
     ips = [str(ip) for ip in network.hosts()]
@@ -30,22 +40,18 @@ async def scan_network(network_range, concurrency=500):
     print(f"📊 总IP数量: {len(ips)}")
     print(f"⚡ 并发数: {concurrency}")
     print(f"⏰ 开始时间: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"🎯 目标重定向: https://edgeone.ai/products/pages")
     
     available_ips = []
     semaphore = asyncio.Semaphore(concurrency)
     
     # 配置HTTP客户端
-    limits = httpx.Limits(
-        max_connections=concurrency,
-        max_keepalive_connections=concurrency
-    )
+    timeout = httpx.Timeout(10.0, connect=5.0)
     
     async with httpx.AsyncClient(
-        limits=limits,
+        timeout=timeout,
         verify=False,
-        headers={
-            'User-Agent': 'Mozilla/5.0 (compatible; GitHub-Actions-Scanner/1.0)'
-        }
+        limits=httpx.Limits(max_connections=concurrency)
     ) as client:
         tasks = [check_ip(client, ip, semaphore) for ip in ips]
         
@@ -59,22 +65,49 @@ async def scan_network(network_range, concurrency=500):
                 completed += 1
                 pbar.update(1)
                 
-                # 每扫描1000个IP输出一次状态
-                if completed % 1000 == 0:
+                # 每扫描500个IP输出一次状态
+                if completed % 500 == 0:
                     print(f"📈 已扫描: {completed}/{len(ips)} | 可用IP: {len(available_ips)}")
     
     return available_ips
 
+def verify_redirect(ip):
+    """验证单个IP的重定向是否正确"""
+    import requests
+    try:
+        response = requests.get(
+            f"https://{ip}/",
+            headers={
+                'Host': 'edgeone.app',
+                'User-Agent': 'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Mobile Safari/537.36'
+            },
+            allow_redirects=False,
+            timeout=5,
+            verify=False
+        )
+        
+        if response.status_code == 302 and 'Location' in response.headers:
+            print(f"🔍 验证 {ip}: 状态码={response.status_code}, Location={response.headers['Location']}")
+            return response.headers['Location'] == 'https://edgeone.ai/products/pages'
+    except Exception as e:
+        print(f"🔍 验证 {ip} 失败: {e}")
+    
+    return False
+
 def main():
     start_time = time.time()
     
-    # 配置参数 - 在GitHub Actions中适当降低并发数
+    # 配置参数
     network_range = "43.174.0.0/15"
-    concurrency = int(os.getenv('CONCURRENCY', '300'))  # 从环境变量获取并发数
+    concurrency = int(os.getenv('CONCURRENCY', '300'))
     
-    print("=" * 50)
-    print("GitHub Actions IP扫描工具")
-    print("=" * 50)
+    print("=" * 60)
+    print("GitHub Actions IP扫描工具 - 302重定向检测版")
+    print("=" * 60)
+    print(f"🎯 目标域名: edgeone.app")
+    print(f"🔄 期望重定向: https://edgeone.ai/products/pages")
+    print(f"🌐 扫描网段: {network_range}")
+    print("=" * 60)
     
     try:
         # 运行扫描
@@ -92,20 +125,27 @@ def main():
         end_time = time.time()
         duration = end_time - start_time
         
-        print("\n" + "=" * 50)
+        print("\n" + "=" * 60)
         print("🎉 扫描完成!")
         print(f"⏱️  总耗时: {duration:.2f} 秒")
-        print(f"📈 扫描速度: {len(available_ips)/duration:.2f} IP/秒")
+        print(f"📈 扫描速度: {len(ips)/max(duration, 0.1):.2f} IP/秒")
         print(f"✅ 可用IP数量: {len(available_ips)}")
         print(f"💾 结果文件: available_ips.txt")
         
-        # 显示前10个可用IP作为示例
+        # 显示可用IP并验证前几个
         if available_ips:
-            print(f"\n📋 前10个可用IP:")
-            for ip in available_ips[:10]:
+            print(f"\n📋 所有可用IP ({len(available_ips)}个):")
+            for ip in available_ips:
                 print(f"  {ip}")
-            if len(available_ips) > 10:
-                print(f"  ... 还有 {len(available_ips) - 10} 个")
+            
+            print(f"\n🔍 验证前3个IP的重定向:")
+            for ip in available_ips[:3]:
+                if verify_redirect(ip):
+                    print(f"  ✅ {ip} - 重定向验证成功")
+                else:
+                    print(f"  ❌ {ip} - 重定向验证失败")
+        else:
+            print("\n❌ 未找到可用IP")
         
     except Exception as e:
         print(f"❌ 扫描过程中出现错误: {e}")
