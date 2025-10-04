@@ -82,6 +82,11 @@ class ProgressReporter:
             self.last_report_time = current_time
             self.last_completed = completed
     
+    def final_report(self):
+        """最终报告"""
+        current_time = time.time()
+        self._report_progress(current_time)
+    
     def _report_progress(self, current_time: float):
         elapsed_minutes = (current_time - self.last_report_time) / 60
         recent_completed = self.completed - self.last_completed
@@ -99,7 +104,8 @@ class ProgressReporter:
         print(f"❌ 不可及: {self.completed - len(self.available_ips)}")
         print(f"⚡ 近期速度: {recent_speed:.1f} IP/分钟")
         print(f"📊 平均速度: {avg_speed:.1f} IP/分钟")
-        print(f"⏱️  预计剩余: {eta_minutes:.1f} 分钟")
+        if eta_minutes > 0:
+            print(f"⏱️  预计剩余: {eta_minutes:.1f} 分钟")
         print("-" * 50)
 
 async def scan_network(network_range: str, concurrency: int = 300, timeout: float = 5.0) -> List[str]:
@@ -120,23 +126,22 @@ async def scan_network(network_range: str, concurrency: int = 300, timeout: floa
     reporter = ProgressReporter(len(ips))
     
     async with IPScanner(concurrency, timeout) as scanner:
-        # 分批处理任务，避免内存占用过高
-        batch_size = 1000
-        for i in range(0, len(ips), batch_size):
-            batch_ips = ips[i:i + batch_size]
-            tasks = [scanner.check_ip(ip, semaphore) for ip in batch_ips]
+        tasks = [scanner.check_ip(ip, semaphore) for ip in ips]
+        completed_count = 0
+        
+        for coro in asyncio.as_completed(tasks):
+            ip, status = await coro
+            completed_count += 1
             
-            for coro in asyncio.as_completed(tasks):
-                ip, status = await coro
-                
-                if status == "可用":
-                    available_ips.append(ip)
-                    print(f"✅ 可用IP: {ip}")
-                
-                reporter.update(i + tasks.index(coro) + 1, available_ips)
+            if status == "可用":
+                available_ips.append(ip)
+                print(f"✅ 可用IP: {ip}")
+            
+            # 更新进度
+            reporter.update(completed_count, available_ips)
     
     # 最终报告
-    reporter.update(len(ips), available_ips)
+    reporter.final_report()
     return available_ips
 
 def verify_redirects(ips: List[str], timeout: int = 5, max_workers: int = 10) -> List[str]:
