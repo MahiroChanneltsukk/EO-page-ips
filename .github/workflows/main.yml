@@ -29,7 +29,7 @@ jobs:
       run: |
         python scan_ips.py
       env:
-        CONCURRENCY: 800  # GitHub Actions环境建议300-500并发
+        CONCURRENCY: 100  # GitHub Actions环境建议300-500并发
         TIMEOUT: 8.0
         
     - name: 上传扫描结果
