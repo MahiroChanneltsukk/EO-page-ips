@@ -1,10 +1,12 @@
-name: IP段扫描
+name: Update EO Pages IPS
 
 on:
   workflow_dispatch:
   push:
     branches: [ main ]
     paths: [ 'scan_ips.py' ]
+  schedule:
+    - cron: '45 */12 * * *'
 
 jobs:
   scan-ips:
