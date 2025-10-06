@@ -6,7 +6,7 @@ on:
     branches: [ main ]
     paths: [ 'scan_ips.py' ]
   schedule:
-    - cron: '45 */12 * * *'
+    - cron: '45 1 */7 * *'
 
 jobs:
   scan-ips:
