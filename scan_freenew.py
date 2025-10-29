@@ -212,7 +212,7 @@ def verify_redirects(ips: List[str], timeout: int = 5, max_workers: int = 10) ->
     
     return verified_ips
 
-def save_results(ips: List[str], filename: str = "available_ips.txt"):
+def save_results(ips: List[str], filename: str = "available_eofreenew_ips.txt"):
     """Save results to file"""
     with open(filename, "w") as f:
         for ip in ips:
@@ -292,7 +292,7 @@ def main():
         print(f"Unreachable IPs: {len(all_ips) - len(available_ips)}", flush=True)
         print(f"Success Rate: {len(available_ips)/len(all_ips)*100:.4f}%", flush=True)
         print(f"Average Speed: {len(all_ips)/max(duration/60, 0.1):.1f} IPs/min", flush=True)
-        print(f"Results File: available_ips.txt", flush=True)
+        print(f"Results File: available_eofreenew_ips.txt", flush=True)
         
         # Display available IPs
         if available_ips:
