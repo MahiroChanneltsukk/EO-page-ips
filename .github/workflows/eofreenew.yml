@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches: [ main ]
-    paths: [ 'scan_ips.py' ]
+    paths: [ 'scan_freenew.py' ]
   schedule:
     - cron: '45 1 */7 * *'
 
@@ -29,7 +29,7 @@ jobs:
         
     - name: Search for IPS
       run: |
-        python scan_ips.py
+        python scan_freenew.py
       env:
         CONCURRENCY: 55
         TIMEOUT: 12.0
