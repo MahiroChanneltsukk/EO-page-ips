@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches: [ main ]
-    paths: [ 'scan_ips.py' ]
+    paths: [ 'scan_eopages_ips.py' ]
   schedule:
     - cron: '45 1 */7 * *'
 
