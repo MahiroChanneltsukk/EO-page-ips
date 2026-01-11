@@ -21,7 +21,7 @@ jobs:
           curl -s "https://api.edgeone.ai/ips?version=v4&area=overseas" -o range.txt
           
           # 验证文件
-          if [ ! -s range-cn.txt ]; then
+          if [ ! -s range.txt ]; then
             echo "Error: Downloaded file is empty!"
             exit 1
           fi
