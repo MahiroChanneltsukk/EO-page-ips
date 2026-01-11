@@ -1,0 +1,38 @@
+name: Weekly IP CN Range Update
+
+on:
+  schedule:
+    # 每周日晚上10点运行 (UTC时间)
+    - cron: '0 22 * * 0'
+  workflow_dispatch: # 允许手动触发
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Download and update IP ranges
+        run: |
+          # 下载IP列表
+          curl -s "https://api.edgeone.ai/ips?version=v4&area=mainland-china" -o range-cn.txt
+          
+          # 验证文件
+          if [ ! -s range-cn.txt ]; then
+            echo "Error: Downloaded file is empty!"
+            exit 1
+          fi
+          
+          # 添加注释
+          sed -i '1i# China IP Ranges from EdgeOne' range-cn.txt
+          sed -i '2i# Updated: $(date -u)' range-cn.txt
+          sed -i '3i# Source: https://api.edgeone.ai/ips?version=v4&area=mainland-china' range-cn.txt
+      
+      - name: Commit changes
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "Update China IP ranges"
+          file_pattern: range-cn.txt
