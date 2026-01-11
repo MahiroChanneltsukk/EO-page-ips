@@ -8,7 +8,7 @@ import sys
 from typing import List, Tuple
 
 class IPScanner:
-    def __init__(self, concurrency=300, timeout=5.0):
+    def __init__(self, concurrency=900, timeout=5.0):
         self.concurrency = concurrency
         self.timeout = timeout
         self.client = None
