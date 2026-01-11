@@ -1,0 +1,33 @@
+name: Weekly IP Range Update
+
+on:
+  schedule:
+    # 每周日晚上10点运行 (UTC时间)
+    - cron: '0 22 * * 0'
+  workflow_dispatch: # 允许手动触发
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Download and update IP ranges
+        run: |
+          # 下载IP列表
+          curl -s "https://api.edgeone.ai/ips?version=v4&area=overseas" -o range.txt
+          
+          # 验证文件
+          if [ ! -s range-cn.txt ]; then
+            echo "Error: Downloaded file is empty!"
+            exit 1
+          fi
+      
+      - name: Commit changes
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "Update IP ranges"
+          file_pattern: range.txt
