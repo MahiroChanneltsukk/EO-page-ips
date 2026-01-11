@@ -49,7 +49,7 @@ class IPScanner:
         async with semaphore:
             try:
                 response = await self.client.get(
-                    f"http://{ip}/",
+                    f"http://{ip}/t",
                     headers={'Host': 'dahi.yu.ac.cn'}
                 )
                 
