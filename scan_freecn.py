@@ -13,7 +13,7 @@ class IPScanner:
         self.timeout = timeout
         self.client = None
         self.session_headers = {
-            'Host': 'chi.nz.eu.org',
+            'Host': 'dahi.yu.ac.cn',
             'User-Agent': 'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Mobile Safari/537.36',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
             'Accept-Language': 'en-US,en;q=0.5',
@@ -50,7 +50,7 @@ class IPScanner:
             try:
                 response = await self.client.get(
                     f"http://{ip}/",
-                    headers={'Host': 'chi.nz.eu.org'}
+                    headers={'Host': 'dahi.yu.ac.cn'}
                 )
                 
                 # Check if it's a 302 redirect with matching Location header
@@ -182,7 +182,7 @@ def verify_redirects(ips: List[str], timeout: int = 5, max_workers: int = 10) ->
         try:
             response = requests.get(
                 f"http://{ip}/",
-                headers={'Host': 'chi.nz.eu.org'},
+                headers={'Host': 'dahi.yu.ac.cn'},
                 allow_redirects=False,
                 timeout=timeout,
                 verify=False
