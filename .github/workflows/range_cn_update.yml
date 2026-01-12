@@ -17,10 +17,9 @@ jobs:
       
       - name: Download and update IP ranges
         run: |
-          # 下载IP列表
+          rm range-cn.txt
           curl -s "https://api.edgeone.ai/ips?version=v4&area=mainland-china" -o range-cn.txt
           
-          # 验证文件
           if [ ! -s range-cn.txt ]; then
             echo "Error: Downloaded file is empty!"
             exit 1
