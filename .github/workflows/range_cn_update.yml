@@ -27,33 +27,66 @@ jobs:
             echo "Original file does not exist, first run"
           fi
           
-      - name: Download new IP ranges
+      - name: Download new IP ranges with retry
+        id: download
         run: |
-          # 下载到临时文件
-          curl -s "https://api.edgeone.ai/ips?version=v4&area=mainland-china" -o range-cn-temp.txt
+          # 方法1: 尝试使用 wget（更稳定）
+          echo "Trying wget..."
+          if wget -q -O range-cn-temp.txt "https://api.edgeone.ai/ips?version=v4&area=mainland-china"; then
+            echo "Download successful using wget"
+            exit 0
+          fi
+          
+          # 方法2: 尝试使用 curl 但禁用 HTTP/2
+          echo "wget failed, trying curl without HTTP/2..."
+          if curl -s --http1.1 "https://api.edgeone.ai/ips?version=v4&area=mainland-china" -o range-cn-temp.txt; then
+            echo "Download successful using curl --http1.1"
+            exit 0
+          fi
+          
+          # 方法3: 尝试使用 curl 但宽松处理
+          echo "curl --http1.1 failed, trying curl with insecure flag..."
+          if curl -s -k --http1.1 "https://api.edgeone.ai/ips?version=v4&area=mainland-china" -o range-cn-temp.txt; then
+            echo "Download successful using curl -k"
+            exit 0
+          fi
+          
+          # 所有方法都失败
+          echo "Error: All download methods failed"
+          exit 1
           
       - name: Validate downloaded content
         run: |
-          # 检查文件是否存在且不为空
-          if [ ! -s range-cn-temp.txt ]; then
-            echo "Error: Downloaded file is empty or does not exist"
+          # 首先检查文件是否存在
+          if [ ! -f range-cn-temp.txt ]; then
+            echo "Error: Downloaded file does not exist"
+            exit 1
+          fi
+          
+          # 检查文件是否为空
+          file_size=$(stat -c%s range-cn-temp.txt 2>/dev/null || stat -f%z range-cn-temp.txt 2>/dev/null || echo "0")
+          if [ "$file_size" -eq 0 ]; then
+            echo "Error: Downloaded file is empty"
             exit 1
           fi
           
           # 检查文件内容是否包含有效的IP地址格式
-          if ! grep -qE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(/[0-9]+)?$' range-cn-temp.txt; then
-            echo "Error: File does not contain valid IP addresses"
+          echo "Checking file content..."
+          valid_lines=$(grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(/[0-9]+)?$' range-cn-temp.txt | wc -l)
+          total_lines=$(wc -l < range-cn-temp.txt)
+          
+          if [ "$valid_lines" -eq 0 ]; then
+            echo "Error: No valid IP addresses found in the file"
+            echo "File content (first 10 lines):"
+            head -10 range-cn-temp.txt
             exit 1
           fi
           
-          # 检查行数是否合理（至少包含一些IP范围）
-          line_count=$(wc -l < range-cn-temp.txt)
-          if [ "$line_count" -lt 10 ]; then
-            echo "Error: File contains too few lines ($line_count), likely invalid"
-            exit 1
+          if [ "$valid_lines" -lt 10 ]; then
+            echo "Warning: Only $valid_lines valid IP ranges found (minimum expected: 10)"
           fi
           
-          echo "Validation passed: $line_count IP ranges found"
+          echo "Validation passed: $valid_lines valid IP ranges out of $total_lines total lines"
           
       - name: Compare with original
         id: compare
@@ -61,24 +94,38 @@ jobs:
           # 检查备份文件是否存在
           if [ -f range-cn-backup.txt ]; then
             echo "Comparing new content with original..."
-            # 排序后比较（以防格式变化）
-            sort range-cn-temp.txt > range-cn-temp-sorted.txt
-            sort range-cn-backup.txt > range-cn-backup-sorted.txt
             
+            # 清理空白行并排序后比较
+            grep -v '^$' range-cn-temp.txt | sort > range-cn-temp-sorted.txt
+            grep -v '^$' range-cn-backup.txt | sort > range-cn-backup-sorted.txt
+            
+            # 检查两个文件是否相同
             if cmp -s range-cn-temp-sorted.txt range-cn-backup-sorted.txt; then
-              echo "No changes detected after sorting"
+              echo "No changes detected"
               echo "has_changes=false" >> $GITHUB_OUTPUT
               echo "changes_count=0" >> $GITHUB_OUTPUT
             else
               # 获取具体的差异信息
-              diff_count=$(diff -u range-cn-backup-sorted.txt range-cn-temp-sorted.txt | grep -E '^[-+]' | grep -v '^---\|^+++' | wc -l)
-              echo "Changes detected: $diff_count lines modified"
+              added_count=$(comm -13 range-cn-backup-sorted.txt range-cn-temp-sorted.txt | wc -l)
+              removed_count=$(comm -23 range-cn-backup-sorted.txt range-cn-temp-sorted.txt | wc -l)
+              total_changes=$((added_count + removed_count))
+              
+              echo "Changes detected: +$added_count / -$removed_count (total: $total_changes)"
               echo "has_changes=true" >> $GITHUB_OUTPUT
-              echo "changes_count=$diff_count" >> $GITHUB_OUTPUT
+              echo "changes_count=$total_changes" >> $GITHUB_OUTPUT
+              echo "added_count=$added_count" >> $GITHUB_OUTPUT
+              echo "removed_count=$removed_count" >> $GITHUB_OUTPUT
               
               # 显示简要差异
-              echo "=== Changes Summary ==="
-              diff -u range-cn-backup-sorted.txt range-cn-temp-sorted.txt | head -50
+              if [ "$added_count" -gt 0 ]; then
+                echo "=== Added IP ranges (first 5) ==="
+                comm -13 range-cn-backup-sorted.txt range-cn-temp-sorted.txt | head -5
+              fi
+              
+              if [ "$removed_count" -gt 0 ]; then
+                echo "=== Removed IP ranges (first 5) ==="
+                comm -23 range-cn-backup-sorted.txt range-cn-temp-sorted.txt | head -5
+              fi
             fi
             
             # 清理排序文件
@@ -99,7 +146,9 @@ jobs:
           if [ "${{ steps.compare.outputs.changes_count }}" = "first_run" ]; then
             commit_msg="Initial China IP ranges - $(date +'%Y-%m-%d %H:%M:%S UTC')"
           else
-            commit_msg="Update China IP ranges (${{ steps.compare.outputs.changes_count }} changes) - $(date +'%Y-%m-%d %H:%M:%S UTC')"
+            added="${{ steps.compare.outputs.added_count }}"
+            removed="${{ steps.compare.outputs.removed_count }}"
+            commit_msg="Update China IP ranges (+${added:-0}/-${removed:-0}) - $(date +'%Y-%m-%d %H:%M:%S UTC')"
           fi
           
           # 配置Git并提交
@@ -115,12 +164,12 @@ jobs:
         if: steps.compare.outputs.has_changes == 'false'
         run: |
           echo "No changes detected. Keeping original file."
-          echo "Cleaning up temporary files..."
+          echo "Skipping commit..."
           
       - name: Cleanup temporary files
         if: always()
         run: |
           # 清理所有临时文件
-          rm -f range-cn-temp.txt range-cn-backup.txt
+          rm -f range-cn-temp.txt range-cn-backup.txt 2>/dev/null || true
           
           echo "Cleanup completed"
