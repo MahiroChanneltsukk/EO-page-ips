@@ -14,15 +14,76 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
-      - name: Download and update IP ranges
-        run: |
-          rm range-cn.txt
-          curl -s "https://api.edgeone.ai/ips?version=v4&area=mainland-china" -o range-cn.txt
-          
-          
-      - name: Commit changes
-        uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "Update China IP ranges"
-          file_pattern: range-cn.txt
+          fetch-depth: 0
+      
+      - name: Download new IP ranges
+        run: |
+          curl -s "https://api.edgeone.ai/ips?version=v4&area=mainland-china" -o range-cn-new.txt
+          
+      - name: Validate downloaded content
+        run: |
+          # 检查文件是否存在且不为空
+          if [ ! -s range-cn-new.txt ]; then
+            echo "Error: Downloaded file is empty or does not exist"
+            exit 1
+          fi
+          
+          # 检查文件内容是否包含有效的IP地址格式
+          if ! grep -qE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(/[0-9]+)?$' range-cn-new.txt; then
+            echo "Error: File does not contain valid IP addresses"
+            exit 1
+          fi
+          
+          # 检查行数是否合理（至少包含一些IP范围）
+          line_count=$(wc -l < range-cn-new.txt)
+          if [ "$line_count" -lt 10 ]; then
+            echo "Error: File contains too few lines ($line_count), likely invalid"
+            exit 1
+          fi
+          
+          echo "Validation passed: $line_count IP ranges found"
+          
+      - name: Check for changes
+        id: check_changes
+        run: |
+          # 检查旧文件是否存在
+          if [ -f range-cn.txt ]; then
+            # 比较新文件和旧文件
+            if cmp -s range-cn-new.txt range-cn.txt; then
+              echo "No changes detected"
+              echo "has_changes=false" >> $GITHUB_OUTPUT
+            else
+              echo "Changes detected"
+              echo "has_changes=true" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "Old file does not exist, first run"
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+          fi
+          
+      - name: Update file if changes detected
+        if: steps.check_changes.outputs.has_changes == 'true'
+        run: |
+          mv range-cn-new.txt range-cn.txt
+          
+      - name: Commit and push if changes
+        if: steps.check_changes.outputs.has_changes == 'true'
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add range-cn.txt
+          git commit -m "Update China IP ranges - $(date +'%Y-%m-%d %H:%M:%S UTC')"
+          git push origin HEAD:${{ github.ref_name }}
+          
+      - name: Cleanup temporary file
+        if: always()
+        run: |
+          if [ -f range-cn-new.txt ]; then
+            rm -f range-cn-new.txt
+          fi
+          
+      - name: No changes notification
+        if: steps.check_changes.outputs.has_changes == 'false'
+        run: |
+          echo "No changes in IP ranges, skipping commit"
