@@ -20,10 +20,6 @@ jobs:
           rm range-cn.txt
           curl -s "https://api.edgeone.ai/ips?version=v4&area=mainland-china" -o range-cn.txt
           
-          if [ ! -s range-cn.txt ]; then
-            echo "Error: Downloaded file is empty!"
-            exit 1
-          fi
           
       - name: Commit changes
         uses: stefanzweifel/git-auto-commit-action@v5
