@@ -17,26 +17,37 @@ jobs:
         with:
           fetch-depth: 0
       
+      - name: Backup original file
+        id: backup
+        run: |
+          if [ -f range-cn.txt ]; then
+            cp range-cn.txt range-cn-backup.txt
+            echo "Original file backed up"
+          else
+            echo "Original file does not exist, first run"
+          fi
+          
       - name: Download new IP ranges
         run: |
-          curl -s "https://api.edgeone.ai/ips?version=v4&area=mainland-china" -o range-cn-new.txt
+          # 下载到临时文件
+          curl -s "https://api.edgeone.ai/ips?version=v4&area=mainland-china" -o range-cn-temp.txt
           
       - name: Validate downloaded content
         run: |
           # 检查文件是否存在且不为空
-          if [ ! -s range-cn-new.txt ]; then
+          if [ ! -s range-cn-temp.txt ]; then
             echo "Error: Downloaded file is empty or does not exist"
             exit 1
           fi
           
           # 检查文件内容是否包含有效的IP地址格式
-          if ! grep -qE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(/[0-9]+)?$' range-cn-new.txt; then
+          if ! grep -qE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(/[0-9]+)?$' range-cn-temp.txt; then
             echo "Error: File does not contain valid IP addresses"
             exit 1
           fi
           
           # 检查行数是否合理（至少包含一些IP范围）
-          line_count=$(wc -l < range-cn-new.txt)
+          line_count=$(wc -l < range-cn-temp.txt)
           if [ "$line_count" -lt 10 ]; then
             echo "Error: File contains too few lines ($line_count), likely invalid"
             exit 1
@@ -44,46 +55,72 @@ jobs:
           
           echo "Validation passed: $line_count IP ranges found"
           
-      - name: Check for changes
-        id: check_changes
+      - name: Compare with original
+        id: compare
         run: |
-          # 检查旧文件是否存在
-          if [ -f range-cn.txt ]; then
-            # 比较新文件和旧文件
-            if cmp -s range-cn-new.txt range-cn.txt; then
-              echo "No changes detected"
+          # 检查备份文件是否存在
+          if [ -f range-cn-backup.txt ]; then
+            echo "Comparing new content with original..."
+            # 排序后比较（以防格式变化）
+            sort range-cn-temp.txt > range-cn-temp-sorted.txt
+            sort range-cn-backup.txt > range-cn-backup-sorted.txt
+            
+            if cmp -s range-cn-temp-sorted.txt range-cn-backup-sorted.txt; then
+              echo "No changes detected after sorting"
               echo "has_changes=false" >> $GITHUB_OUTPUT
+              echo "changes_count=0" >> $GITHUB_OUTPUT
             else
-              echo "Changes detected"
+              # 获取具体的差异信息
+              diff_count=$(diff -u range-cn-backup-sorted.txt range-cn-temp-sorted.txt | grep -E '^[-+]' | grep -v '^---\|^+++' | wc -l)
+              echo "Changes detected: $diff_count lines modified"
               echo "has_changes=true" >> $GITHUB_OUTPUT
+              echo "changes_count=$diff_count" >> $GITHUB_OUTPUT
+              
+              # 显示简要差异
+              echo "=== Changes Summary ==="
+              diff -u range-cn-backup-sorted.txt range-cn-temp-sorted.txt | head -50
             fi
+            
+            # 清理排序文件
+            rm -f range-cn-temp-sorted.txt range-cn-backup-sorted.txt
           else
-            echo "Old file does not exist, first run"
+            echo "No original file found, treating as first run"
             echo "has_changes=true" >> $GITHUB_OUTPUT
+            echo "changes_count=first_run" >> $GITHUB_OUTPUT
           fi
           
-      - name: Update file if changes detected
-        if: steps.check_changes.outputs.has_changes == 'true'
+      - name: Update file and commit if changes detected
+        if: steps.compare.outputs.has_changes == 'true'
         run: |
-          mv range-cn-new.txt range-cn.txt
+          # 更新主文件
+          mv range-cn-temp.txt range-cn.txt
           
-      - name: Commit and push if changes
-        if: steps.check_changes.outputs.has_changes == 'true'
-        run: |
+          # 准备提交信息
+          if [ "${{ steps.compare.outputs.changes_count }}" = "first_run" ]; then
+            commit_msg="Initial China IP ranges - $(date +'%Y-%m-%d %H:%M:%S UTC')"
+          else
+            commit_msg="Update China IP ranges (${{ steps.compare.outputs.changes_count }} changes) - $(date +'%Y-%m-%d %H:%M:%S UTC')"
+          fi
+          
+          # 配置Git并提交
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           git add range-cn.txt
-          git commit -m "Update China IP ranges - $(date +'%Y-%m-%d %H:%M:%S UTC')"
+          git commit -m "$commit_msg"
           git push origin HEAD:${{ github.ref_name }}
           
-      - name: Cleanup temporary file
+          echo "✅ File updated and committed successfully"
+          
+      - name: No changes - clean up
+        if: steps.compare.outputs.has_changes == 'false'
+        run: |
+          echo "No changes detected. Keeping original file."
+          echo "Cleaning up temporary files..."
+          
+      - name: Cleanup temporary files
         if: always()
         run: |
-          if [ -f range-cn-new.txt ]; then
-            rm -f range-cn-new.txt
-          fi
+          # 清理所有临时文件
+          rm -f range-cn-temp.txt range-cn-backup.txt
           
-      - name: No changes notification
-        if: steps.check_changes.outputs.has_changes == 'false'
-        run: |
-          echo "No changes in IP ranges, skipping commit"
+          echo "Cleanup completed"
